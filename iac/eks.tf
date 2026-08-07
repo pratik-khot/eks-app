@@ -1,3 +1,49 @@
+resource "aws_iam_role" "vpc_cni_addon" {
+  name = "eks-addon-vpc-cni-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "pods.eks.amazonaws.com"
+      }
+      Action = [
+        "sts:AssumeRole",
+        "sts:TagSession"
+      ]
+    }]
+  })
+}
+
+resource "aws_iam_role" "ebs_csi_addon" {
+  name = "eks-addon-ebs-csi-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "pods.eks.amazonaws.com"
+      }
+      Action = [
+        "sts:AssumeRole",
+        "sts:TagSession"
+      ]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "vpc_cni_addon" {
+  role       = aws_iam_role.vpc_cni_addon.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi_addon" {
+  role       = aws_iam_role.ebs_csi_addon.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
@@ -13,6 +59,17 @@ module "eks" {
     kube-proxy             = {}
     vpc-cni                = {
       before_compute = true
+      pod_identity_association = [{
+        role_arn        = aws_iam_role.vpc_cni_addon.arn
+        service_account = "aws-node"
+      }]
+    }
+    aws-ebs-csi-driver     = {
+      before_compute = true
+      pod_identity_association = [{
+        role_arn        = aws_iam_role.ebs_csi_addon.arn
+        service_account = "ebs-csi-controller-sa"
+      }]
     }
   }
 
@@ -22,19 +79,20 @@ module "eks" {
   # Optional: Adds the current caller identity as an administrator via cluster access entry
   enable_cluster_creator_admin_permissions = true
 
-  vpc_id                   = "vpc-1234556abcdef"
-  subnet_ids               = ["subnet-abcde012", "subnet-bcde012a", "subnet-fghi345a"]
-  control_plane_subnet_ids = ["subnet-xyzde987", "subnet-slkjf456", "subnet-qeiru789"]
+  vpc_id                   = module.vpc.vpc_id
+  subnet_ids               = module.vpc.private_subnets
+  control_plane_subnet_ids = module.vpc.private_subnets
 
   # EKS Managed Node Group(s)
   eks_managed_node_groups = {
     example = {
       # Starting on 1.30, AL2023 is the default AMI type for EKS managed node groups
-      ami_type       = "AL2023_x86_64_STANDARD"
-      instance_types = ["m5.xlarge"]
+      # ami_type       = "AL2023_x86_64_STANDARD"
+      # instance_types = ["m5.xlarge"]
+      use_template = false
 
       min_size     = 2
-      max_size     = 10
+      max_size     = 4
       desired_size = 2
     }
   }
